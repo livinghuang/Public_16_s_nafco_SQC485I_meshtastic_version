@@ -2,55 +2,56 @@
 
 # SQC485I v2 (Meshtastic) Firmware Flashing & Repair Guide
 
-Official firmware download & self-repair guide for the NAFCO **SQC485I v2** RS485-to-Meshtastic node.
-If the device firmware is corrupted or you need to restore factory firmware, follow this document to reflash it yourself.
+Official firmware download and self-flashing guide for the NAFCO RS485-to-Meshtastic field node
+(model **SQC485I v2**, **Meshtastic mesh version**). If a unit's firmware becomes corrupted or you
+need to restore the factory firmware, you can re-flash it yourself by following this guide.
 
-> This repo only publishes firmware binaries — the source code is kept private.
+- **Firmware version:** `v1.0.0` (based on Meshtastic `2.7.20`; NAFCO field-node customization, RS485 Modbus → Meshtastic mesh forwarding)
+- **MCU:** ESP32-C3 + SX1262 (LoRa)
+- **Region:** AS923-TW (Taiwan)
 
-- **MCU:** ESP32-C3 + SX1262 (LoRa, AS923-TW)
-- **Firmware version:** see the [**Releases**](../../releases) page
-- **Download:** grab the firmware package for the **matching node role** from [**Releases**](../../releases).
+> This unit is a **Meshtastic mesh node**, not a LoRaWAN device. It reads PLC data over RS485
+> (Modbus RTU, FC03) and forwards it across a Meshtastic LoRa mesh; the mesh is collected into MQTT
+> by the USB receiver on the linxdot box.
 
 ---
 
-## What this is
+## 0. ⚠️ Pick the right firmware first (v231 or v233)
 
-The SQC485I v2 reads data from a PLC (SPM-8, Modbus RTU slave) over RS485 and forwards it across a
-Meshtastic LoRa mesh to the backend. There are **two firmware builds** by node role:
+This product ships in two hardware revisions whose **RS485 DE (transmit-enable) pin polarity is
+reversed**. Flashing the wrong one makes RS485 transmit/receive run backwards — **Modbus reads
+nothing** (the unit boots fine and even joins the mesh, but never reports any PLC values). Use the
+table below to choose:
 
-| Role | Meshtastic role | Purpose | Firmware prefix |
-|---|---|---|---|
-| Field node | `CLIENT` | Reads the PLC over RS485, uplinks a payload every 15s (portnum 256) | `firmware-sqc485iv2-field-…` |
-| Gateway node | `CLIENT_MUTE` | Receives mesh packets, uplinks via WiFi + MQTT to the LAN | `firmware-sqc485iv2-gateway-…` |
+| Board rev | How to identify (by sight) | Firmware folder |
+|---|---|---|
+| **v233** (newer, after 2026-05) | A single **8-pin connector `CN1`** + a separate **2-pin battery connector `CN2`**; an onboard 2.4 GHz chip antenna **is present** | [`firmware/v233/`](firmware/v233/) |
+| **v231** (older / Lot 1, 2026-02) | Two connectors: **4-pin `CONN2` + 6-pin `CONN3`**; **no** onboard 2.4 GHz antenna | [`firmware/v231/`](firmware/v231/) |
 
-Data flow:
+> **Why:** v231 uses a single inverter (U6) and drives RS485 `DE` **directly from `GPIO9`**
+> (HIGH = transmit); v233 uses a dual inverter (U7) so `GPIO9` is inverted before `DE`
+> (LOW = transmit). This polarity is the only firmware-visible difference, hence two builds.
+>
+> If unsure, the fastest tell is the external connector: **one 8-pin (v233) vs. a 4-pin + 6-pin
+> pair (v231)**.
 
-```
-[PLC SPM-8 / Modbus RTU slave]
-  → RS485 19200 8N1
-[SQC485I v2 Field node ×N]    Meshtastic role=CLIENT
-  → LoRa AS923 mesh
-[SQC485I v2 Gateway node ×1]  Meshtastic role=CLIENT_MUTE
-  → WiFi / MQTT
-[Mosquitto] → [Decoder] → [InfluxDB] → [Grafana]
-```
-
-> ⚠️ Before flashing, confirm whether you need the **field** or **gateway** firmware — **they are not interchangeable**.
+**Download:** from the [**Releases**](../../releases) page, or take `firmware-merged.bin` directly
+from the matching `firmware/v2xx/` folder (a single merged image containing bootloader, partition
+table, and application). **In the commands below, use the `firmware-merged.bin` from your variant.**
 
 ---
 
 ## 1. What you need
 
-1. **A USB cable** (connect directly to the SQC485I USB port — native ESP32-C3 USB).
-2. **Python 3 + esptool:** install Python 3, then run `pip install esptool`.
-3. The **firmware package** downloaded from [Releases](../../releases). Keep **all files in the same folder**
-   (the install script locates the companion files automatically). Each package contains:
-   - `firmware-sqc485iv2-<role>-<ver>.factory.bin` — full factory image (**initial flash**)
-   - `firmware-sqc485iv2-<role>-<ver>.mt.json` — partition metadata (required by device-install)
-   - `mt-esp32c3-ota.bin` — OTA partition stub
-   - `littlefs-sqc485iv2-<ver>.bin` — filesystem partition
-   - `firmware-sqc485iv2-<role>-<ver>.bin` — application image (**update**, keeps settings)
-   - `device-install.sh` / `device-update.sh` (official Meshtastic scripts; `.bat` on Windows)
+1. A **USB cable** (connect directly to the SQC485I USB port — ESP32-C3 native USB).
+2. **esptool** (Espressif's official flashing tool, cross-platform Windows / macOS / Linux).
+   Install Python 3, then run:
+
+   ```bash
+   pip install esptool
+   ```
+
+3. The matching **`firmware-merged.bin`** (from `firmware/v233/` or `firmware/v231/`).
 
 ---
 
@@ -64,78 +65,77 @@ Data flow:
 
 ---
 
-## 3. Flash
+## 3. Flash the firmware (single file, one command)
 
-### A. Initial flash — new device or factory restore (erases settings)
-
-Unzip the package, open a terminal in that folder, replace `<PORT>` with the port from step 2 and
-`<role>` with `field` or `gateway`:
+Open a terminal in the folder containing your variant's `firmware-merged.bin`, and replace `<PORT>`
+with the port from the previous step:
 
 **macOS / Linux**
 
 ```bash
-./device-install.sh -p <PORT> -f firmware-sqc485iv2-<role>-<ver>.factory.bin
+esptool.py --chip esp32c3 --port <PORT> --baud 921600 write_flash 0x0 firmware-merged.bin
 ```
 
-**Windows**
+**Windows (with a COM port)**
 
 ```bat
-device-install.bat -p COM5 -f firmware-sqc485iv2-<role>-<ver>.factory.bin
+esptool.py --chip esp32c3 --port COM5 --baud 921600 write_flash 0x0 firmware-merged.bin
 ```
 
-Prefer no script? Flash the full factory image manually:
-
-```bash
-esptool.py --chip esp32c3 --port <PORT> --baud 921600 write_flash 0x0 firmware-sqc485iv2-<role>-<ver>.factory.bin
-```
-
-`Hash of data verified.` and `Hard resetting...` means success.
-
-### B. Update — keeps settings (recommended for normal repair)
-
-```bash
-./device-update.sh -p <PORT> -f firmware-sqc485iv2-<role>-<ver>.bin
-```
-
-> Update uses the plain `.bin` (**not** `.factory.bin`); it rewrites only the app partition, so the
-> node's settings (keys, channel, role) are preserved.
+`Hash of data verified.` followed by `Hard resetting...` means success. The device reboots and
+resumes normal operation automatically.
 
 ---
 
-## 4. ⚠️ Important: initial flash wipes node identity
+## 4. ⚠️ Important: do NOT erase
 
-- A Meshtastic node's **PKI key pair, channel config (NAFCO channel), region (AS923-TW) and RS485/role
-  settings** all live in flash NVS.
-- **An initial/factory flash erases them** → the node gets a **new identity** and must be re-configured
-  (channel, region, role) and re-added to the mesh.
-- **For normal repair/updates use path B (`device-update.sh` + plain `.bin`)** to keep settings — no
-  re-provisioning needed.
+- **For a normal repair, do NOT add `erase_flash` or `--erase`.**
+- The device's **Meshtastic configuration** (region TW, channel + PSK key, device role, and the
+  RS485/Serial module settings) is stored in NVS. Erasing it resets all of these, and the node will
+  **fail to rejoin the NAFCO mesh** until it is fully re-provisioned (region / channel / PSK / role
+  set again) before it can forward RS485 data.
+- The node ID is derived from the chip's MAC and **survives a reflash**; but the channel PSK and
+  module settings do **not** — they must be reapplied after an erase.
+- A plain `write_flash` (no erase) keeps the existing config, so the device rejoins the mesh
+  automatically.
 
 ---
 
 ## 5. Firmware integrity (SHA-256)
 
-Each Release lists the SHA-256 of every file. After downloading, verify the file is intact:
+After downloading, verify the hash to confirm the file is intact:
 
-```bash
-shasum -a 256 <file>               # macOS / Linux
-certutil -hashfile <file> SHA256   # Windows
-```
+| Variant | File | SHA-256 |
+|------|------|---------|
+| **v233** | `firmware/v233/firmware-merged.bin` | `947d857e9119dade02435601400ad900abb7abcae5ad41913dbf16140f4d5c87` |
+| **v231** | `firmware/v231/firmware-merged.bin` | `f4424ea1eca8ac133f7d230470219845148e7075b3e7d174bdbaa72b01bc9f4c` |
+
+Verify with: `shasum -a 256 firmware-merged.bin` (macOS/Linux) or
+`certutil -hashfile firmware-merged.bin SHA256` (Windows).
 
 ---
 
 ## 6. Troubleshooting
 
-| Symptom | What to do |
+| Symptom | Fix |
 |------|----------|
-| Port not found / connection fails | Try another USB cable, confirm drivers are installed; close any program holding the port (e.g. a serial monitor). |
-| `Failed to connect` / can't enter download mode | Hold the **BOOT** button, plug in USB (or tap **RESET**), release BOOT, then rerun. |
-| Flashed but node never joins | Confirm you flashed the **correct role** (field / gateway); after an initial flash you must reconfigure channel / region / role. |
-| Settings disappeared after flashing | You used the initial flash (`.factory.bin`). For updates use `device-update.sh` + plain `.bin`. |
+| Port not found / connection failed | Try another USB cable; confirm the driver is installed; close any program holding the port (e.g. a serial monitor or the Meshtastic app). |
+| `Failed to connect` / cannot enter download mode | Hold the **BOOT** button, plug in USB (or press **RESET**), then release BOOT and re-run the command. |
+| Still not working after flashing | Confirm the filename and port are correct, then flash again. |
+| **Unit joins the mesh but PLC values never arrive** | **Almost always the wrong board variant was flashed (v231/v233 DE polarity is reversed).** Go back to Section 0, re-check the board by its connectors, and flash the correct firmware. |
+| No data reaching the mesh after flashing | Confirm the config was not erased (region TW / channel / PSK / role), and check the RS485 wiring and PLC (Modbus slave). |
+
+---
+
+## Advanced
+
+If you need to flash the separate segment files instead, each `firmware/v2xx/` folder still
+provides `bootloader.bin` (`0x0`), `partitions.bin` (`0x8000`), `boot_app0.bin` (`0xe000`),
+and `firmware.bin` (`0x10000`). Most customers should just use the matching `firmware-merged.bin`.
 
 ---
 
 ## Support
 
-For firmware and hardware issues, contact your supplier. This page only provides factory firmware
-download and flashing instructions — **no source code, and issues are not accepted here**.
+For firmware and hardware questions, please contact your supplier. This page provides factory
+firmware download and flashing instructions only; it does not include source code.
