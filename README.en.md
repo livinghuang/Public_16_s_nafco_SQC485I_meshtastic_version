@@ -6,7 +6,7 @@ Official firmware download and self-flashing guide for the NAFCO RS485-to-Meshta
 (model **SQC485I v2**, **Meshtastic mesh version**). If a unit's firmware becomes corrupted or you
 need to restore the factory firmware, you can re-flash it yourself by following this guide.
 
-- **Firmware version:** `v1.0.1` (based on Meshtastic `2.7.20`; NAFCO field-node customization, RS485 Modbus → Meshtastic mesh forwarding)
+- **Firmware version:** `v1.0.2` (based on Meshtastic `2.7.20`; NAFCO field-node customization, RS485 Modbus → Meshtastic mesh forwarding)
 - **MCU:** ESP32-C3 + SX1262 (LoRa)
 - **Region:** AS923-TW (Taiwan)
 
@@ -107,8 +107,8 @@ After downloading, verify the hash to confirm the file is intact:
 
 | Variant | File | SHA-256 |
 |------|------|---------|
-| **v233** | `firmware/v233/firmware-merged.bin` | `4e6078ebf5be5294d4fda91c3e7ab0748921007efa7e41742455ec1256fef379` |
-| **v231** | `firmware/v231/firmware-merged.bin` | `9d8e6430e5c9c3f9e52b3a176156c142d26b02235dd8ca78c1f347b7325ccfad` |
+| **v233** | `firmware/v233/firmware-merged.bin` | `6282b88b35ff4af32a9b894700d27429f568178b0e2ae2abf7162868550d63fb` |
+| **v231** | `firmware/v231/firmware-merged.bin` | `6b7893a7a0ae94c17dbac2b5dc47b15d76086a5bd2f2411b05ef1afe93a051b0` |
 
 Verify with: `shasum -a 256 firmware-merged.bin` (macOS/Linux) or
 `certutil -hashfile firmware-merged.bin SHA256` (Windows).
